@@ -7,108 +7,81 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* Custom styles */
-        .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
+        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
         .status-creator { background: linear-gradient(45deg, #f59e0b, #dc2626); color: white; }
         .status-admin { background: linear-gradient(45deg, #3b82f6, #1d4ed8); color: white; }
         .status-moderator { background: linear-gradient(45deg, #10b981, #059669); color: white; }
         .status-vip { background: linear-gradient(45deg, #8b5cf6, #7c3aed); color: white; }
         .status-user { background: #6b7280; color: white; }
         
-        .avatar-upload {
-            position: relative;
-            width: 120px;
-            height: 120px;
-            margin: 0 auto;
-            border-radius: 50%;
-            overflow: hidden;
-            border: 3px solid #3b82f6;
-            cursor: pointer;
-        }
-        .avatar-upload input {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-        }
-        .avatar-upload img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        .avatar-upload:hover::after {
-            content: 'Өзгөртүү';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-        }
+        .message-bubble { max-width: 70%; border-radius: 18px; }
+        .message-bubble.sent { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; margin-left: auto; }
+        .message-bubble.received { background: #f3f4f6; color: #374151; margin-right: auto; }
         
-        .message-bubble {
-            max-width: 70%;
-            border-radius: 18px;
-            position: relative;
-        }
-        .message-bubble.sent {
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            color: white;
-            margin-left: auto;
-        }
-        .message-bubble.received {
-            background: #f3f4f6;
-            color: #374151;
-            margin-right: auto;
-        }
+        .online-dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; position: absolute; bottom: 0; right: 0; border: 2px solid white; }
         
-        .online-dot {
-            width: 10px;
-            height: 10px;
-            background: #10b981;
-            border-radius: 50%;
-            position: absolute;
-            bottom: 0;
-            right: 0;
-            border: 2px solid white;
-        }
+        /* Group chat colors */
+        .group-1 { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .group-2 { background: linear-gradient(135deg, #10b981, #059669); }
+        .group-3 { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+        .group-4 { background: linear-gradient(135deg, #ec4899, #db2777); }
         
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        /* Bad words highlight */
+        .bad-word { background-color: #fee2e2; color: #dc2626; padding: 2px 4px; border-radius: 4px; }
+        
+        /* Temporary block */
+        .temp-blocked { opacity: 0.5; position: relative; }
+        .temp-blocked::after { 
+            content: '🚫 Блок'; 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            background: rgba(220, 38, 38, 0.9); 
+            color: white; 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            font-size: 12px; 
+            z-index: 10; 
+        }
     </style>
 </head>
 <body class="bg-gray-50">
     <div id="app" class="min-h-screen"></div>
 
     <script>
-        // Jalaabad Chat App
+        // Jalaabad Chat with Groups and Moderation
         class JalaabadChat {
             constructor() {
                 this.state = {
                     page: 'login',
                     user: null,
-                    messages: [],
+                    messages: [], // All messages
+                    privateMessages: [], // Private messages
+                    groupMessages: {}, // Group messages {groupId: [messages]}
                     users: [],
+                    groups: [],
                     newMessage: '',
+                    selectedChat: null, // null for public, userId for private, groupId for group
+                    chatType: 'public', // public, private, group
                     
                     // Registration
                     regUsername: '',
-                    regPhone: '',
+                    regLogin: '', // New: Login instead of phone
                     regPassword: '',
                     regAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user',
                     
-                    // Admin
+                    // Group creation
+                    newGroupName: '',
+                    newGroupDesc: '',
+                    selectedGroupMembers: [],
+                    
+                    // Admin moderation
+                    badWords: ['жаман', 'уурда', 'уруп', 'кордук', 'кара', 'эмне', 'кеми', 'чап', 'сог'],
+                    tempBlocks: {}, // {userId: blockUntilTimestamp}
+                    reportedMessages: [], // Reported messages for moderation
+                    
+                    // Edit user status
                     editingUser: null,
                     newStatus: 'user',
                     customStatus: ''
@@ -118,36 +91,67 @@
             }
             
             init() {
-                // Load data from localStorage
+                // Load from localStorage
                 const savedUser = localStorage.getItem('jalaabad_user');
                 const savedMessages = localStorage.getItem('jalaabad_messages');
+                const savedPrivate = localStorage.getItem('jalaabad_private');
+                const savedGroupMessages = localStorage.getItem('jalaabad_group_messages');
                 const savedUsers = localStorage.getItem('jalaabad_users');
+                const savedGroups = localStorage.getItem('jalaabad_groups');
+                const savedTempBlocks = localStorage.getItem('jalaabad_tempblocks');
+                const savedReports = localStorage.getItem('jalaabad_reports');
                 
-                if (savedUser) {
-                    this.state.user = JSON.parse(savedUser);
-                    this.state.page = 'chat';
-                }
+                if (savedUser) this.state.user = JSON.parse(savedUser);
                 if (savedMessages) this.state.messages = JSON.parse(savedMessages);
+                if (savedPrivate) this.state.privateMessages = JSON.parse(savedPrivate);
+                if (savedGroupMessages) this.state.groupMessages = JSON.parse(savedGroupMessages);
                 if (savedUsers) this.state.users = JSON.parse(savedUsers);
+                if (savedGroups) this.state.groups = JSON.parse(savedGroups);
+                if (savedTempBlocks) this.state.tempBlocks = JSON.parse(savedTempBlocks);
+                if (savedReports) this.state.reportedMessages = JSON.parse(savedReports);
                 
-                // Add default users if empty
-                if (this.state.users.length === 0) {
-                    this.createDefaultUsers();
-                }
+                // Check temp blocks expiration
+                this.checkTempBlocks();
+                
+                // Create default data if empty
+                if (this.state.users.length === 0) this.createDefaultUsers();
+                if (this.state.groups.length === 0) this.createDefaultGroups();
+                if (!this.state.groupMessages) this.state.groupMessages = {};
                 
                 this.render();
             }
             
+            checkTempBlocks() {
+                const now = Date.now();
+                for (const userId in this.state.tempBlocks) {
+                    if (this.state.tempBlocks[userId] < now) {
+                        delete this.state.tempBlocks[userId];
+                    }
+                }
+                this.saveTempBlocks();
+            }
+            
+            saveAll() {
+                if (this.state.user) localStorage.setItem('jalaabad_user', JSON.stringify(this.state.user));
+                localStorage.setItem('jalaabad_messages', JSON.stringify(this.state.messages));
+                localStorage.setItem('jalaabad_private', JSON.stringify(this.state.privateMessages));
+                localStorage.setItem('jalaabad_group_messages', JSON.stringify(this.state.groupMessages));
+                localStorage.setItem('jalaabad_users', JSON.stringify(this.state.users));
+                localStorage.setItem('jalaabad_groups', JSON.stringify(this.state.groups));
+                localStorage.setItem('jalaabad_tempblocks', JSON.stringify(this.state.tempBlocks));
+                localStorage.setItem('jalaabad_reports', JSON.stringify(this.state.reportedMessages));
+            }
+            
             createDefaultUsers() {
-                // Super Admin (Creator) - eXM_404
+                // Creator - exm_404
                 const creator = {
                     id: '1',
-                    username: 'eXM_404',
-                    phone: '+996555123456',
-                    password: 'SuperAdmin123',
+                    username: 'exm_404',
+                    login: 'exm_404',
+                    password: 'eluxa',
                     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=exm404',
                     status: 'creator',
-                    customStatus: 'Колледждин Создатели',
+                    customStatus: 'Проекттин Создатели',
                     role: 'superadmin',
                     vipLevel: 10,
                     isOnline: true,
@@ -155,11 +159,11 @@
                     registeredAt: new Date().toISOString()
                 };
                 
-                // Sample admin
+                // Admin
                 const admin = {
                     id: '2',
                     username: 'Администратор',
-                    phone: '+996555000001',
+                    login: 'admin',
                     password: 'admin123',
                     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
                     status: 'admin',
@@ -171,67 +175,150 @@
                     registeredAt: new Date().toISOString()
                 };
                 
-                // Sample VIP user
-                const vipUser = {
+                // Moderator
+                const moderator = {
                     id: '3',
-                    username: 'VIP Студент',
-                    phone: '+996555000002',
-                    password: 'vip123',
-                    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=vip',
-                    status: 'vip',
-                    customStatus: 'Активдүү студент',
-                    role: 'user',
+                    username: 'Модератор',
+                    login: 'moderator',
+                    password: 'mod123',
+                    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=moderator',
+                    status: 'moderator',
+                    customStatus: 'Контент модераторы',
+                    role: 'moderator',
                     vipLevel: 3,
                     isOnline: true,
                     isBlocked: false,
                     registeredAt: new Date().toISOString()
                 };
                 
-                this.state.users = [creator, admin, vipUser];
-                this.saveUsers();
+                // Sample VIP
+                const vip = {
+                    id: '4',
+                    username: 'VIP Студент',
+                    login: 'vip',
+                    password: 'vip123',
+                    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=vip',
+                    status: 'vip',
+                    customStatus: 'Активдүү студент',
+                    role: 'user',
+                    vipLevel: 2,
+                    isOnline: true,
+                    isBlocked: false,
+                    registeredAt: new Date().toISOString()
+                };
+                
+                this.state.users = [creator, admin, moderator, vip];
+                this.saveAll();
             }
             
-            saveUser() {
-                localStorage.setItem('jalaabad_user', JSON.stringify(this.state.user));
+            createDefaultGroups() {
+                const groups = [
+                    {
+                        id: 'g1',
+                        name: '3-Курс',
+                        description: '3-курс студенттери',
+                        avatar: '👨‍🎓',
+                        color: 'group-1',
+                        creator: '1',
+                        admins: ['1', '2'],
+                        members: ['1', '2', '3', '4'],
+                        isPublic: true,
+                        createdAt: new Date().toISOString()
+                    },
+                    {
+                        id: 'g2',
+                        name: 'Программисттер',
+                        description: 'IT бөлүмү',
+                        avatar: '💻',
+                        color: 'group-2',
+                        creator: '2',
+                        admins: ['2'],
+                        members: ['1', '2', '4'],
+                        isPublic: true,
+                        createdAt: new Date().toISOString()
+                    },
+                    {
+                        id: 'g3',
+                        name: 'Жакындар',
+                        description: 'Досум менен',
+                        avatar: '👥',
+                        color: 'group-3',
+                        creator: '4',
+                        admins: ['4'],
+                        members: ['1', '4'],
+                        isPublic: false,
+                        createdAt: new Date().toISOString()
+                    }
+                ];
+                
+                this.state.groups = groups;
+                this.saveAll();
             }
             
-            saveMessages() {
-                localStorage.setItem('jalaabad_messages', JSON.stringify(this.state.messages));
-            }
-            
-            saveUsers() {
-                localStorage.setItem('jalaabad_users', JSON.stringify(this.state.users));
-            }
-            
-            // Avatar upload simulation
-            uploadAvatar(event) {
-                const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        this.state.regAvatar = e.target.result;
+            // LOGIN with username/password (not phone)
+            login(login, password) {
+                // Creator login - exm_404
+                if (login === 'exm_404' && password === 'eluxa') {
+                    this.state.user = this.state.users.find(u => u.id === '1');
+                    if (this.state.user) {
+                        this.state.user.isOnline = true;
+                        this.state.page = 'chat';
+                        this.saveAll();
                         this.render();
-                    };
-                    reader.readAsDataURL(file);
+                    }
+                    return;
+                }
+                
+                // Regular user login
+                const user = this.state.users.find(u => 
+                    u.login === login && u.password === password
+                );
+                
+                if (user) {
+                    if (user.isBlocked) {
+                        alert('Сиздин аккаунтуңуз блокторулган!');
+                        return;
+                    }
+                    
+                    // Check temporary block
+                    if (this.state.tempBlocks[user.id]) {
+                        const blockUntil = new Date(this.state.tempBlocks[user.id]);
+                        const now = new Date();
+                        if (blockUntil > now) {
+                            const remaining = Math.ceil((blockUntil - now) / 60000); // minutes
+                            alert(`Сиз убактылуу блокторулдуңуз! ${remaining} мүнөт калды.`);
+                            return;
+                        } else {
+                            delete this.state.tempBlocks[user.id];
+                        }
+                    }
+                    
+                    user.isOnline = true;
+                    this.state.user = user;
+                    this.state.page = 'chat';
+                    this.saveAll();
+                    this.render();
+                } else {
+                    alert('Ката логин же сырсөз!');
                 }
             }
             
             register() {
-                if (!this.state.regUsername || !this.state.regPhone || !this.state.regPassword) {
+                if (!this.state.regUsername || !this.state.regLogin || !this.state.regPassword) {
                     alert('Баарын толтуруңуз!');
                     return;
                 }
                 
-                // Check if phone already exists
-                if (this.state.users.some(u => u.phone === this.state.regPhone)) {
-                    alert('Бул телефон номер мурунтан эле катталган!');
+                // Check if login already exists
+                if (this.state.users.some(u => u.login === this.state.regLogin)) {
+                    alert('Бул логин мурунтан эле катталган!');
                     return;
                 }
                 
                 const newUser = {
                     id: Date.now().toString(),
                     username: this.state.regUsername,
-                    phone: this.state.regPhone,
+                    login: this.state.regLogin,
                     password: this.state.regPassword,
                     avatar: this.state.regAvatar,
                     status: 'user',
@@ -247,66 +334,92 @@
                 this.state.user = newUser;
                 this.state.page = 'chat';
                 
-                // Reset registration form
+                // Reset form
                 this.state.regUsername = '';
-                this.state.regPhone = '';
+                this.state.regLogin = '';
                 this.state.regPassword = '';
                 this.state.regAvatar = 'https://api.dicebear.com/7.x/avataaars/svg?seed=user';
                 
-                this.saveUsers();
-                this.saveUser();
+                this.saveAll();
                 this.render();
                 
                 alert('Катталдыңыз! Кош келиңиз, ' + newUser.username);
             }
             
-            login(phone, password) {
-                // Super admin login
-                if (phone === '+996555123456' && password === 'SuperAdmin123') {
-                    this.state.user = this.state.users.find(u => u.id === '1');
-                    this.state.page = 'chat';
-                    this.saveUser();
-                    this.render();
+            // GROUP FUNCTIONS
+            createGroup() {
+                if (!this.state.newGroupName.trim()) {
+                    alert('Группанын атын жазыңыз!');
                     return;
                 }
                 
-                // Regular user login
-                const user = this.state.users.find(u => 
-                    u.phone === phone && u.password === password
-                );
+                const newGroup = {
+                    id: 'g' + Date.now().toString(),
+                    name: this.state.newGroupName,
+                    description: this.state.newGroupDesc,
+                    avatar: '👥',
+                    color: `group-${(this.state.groups.length % 4) + 1}`,
+                    creator: this.state.user.id,
+                    admins: [this.state.user.id],
+                    members: [this.state.user.id, ...this.state.selectedGroupMembers],
+                    isPublic: true,
+                    createdAt: new Date().toISOString()
+                };
                 
-                if (user) {
-                    if (user.isBlocked) {
-                        alert('Сиздин аккаунтуңуз блокторулган!');
-                        return;
-                    }
-                    
-                    user.isOnline = true;
-                    this.state.user = user;
-                    this.state.page = 'chat';
-                    this.saveUsers();
-                    this.saveUser();
+                this.state.groups.push(newGroup);
+                this.state.newGroupName = '';
+                this.state.newGroupDesc = '';
+                this.state.selectedGroupMembers = [];
+                this.state.groupMessages[newGroup.id] = [];
+                
+                this.saveAll();
+                this.render();
+                
+                alert('Группа түзүлдү: ' + newGroup.name);
+            }
+            
+            joinGroup(groupId) {
+                const group = this.state.groups.find(g => g.id === groupId);
+                if (group && !group.members.includes(this.state.user.id)) {
+                    group.members.push(this.state.user.id);
+                    this.saveAll();
                     this.render();
-                } else {
-                    alert('Ката телефон же сырсөз!');
                 }
             }
             
-            logout() {
-                if (this.state.user) {
-                    const user = this.state.users.find(u => u.id === this.state.user.id);
-                    if (user) user.isOnline = false;
-                    this.saveUsers();
+            leaveGroup(groupId) {
+                const group = this.state.groups.find(g => g.id === groupId);
+                if (group) {
+                    group.members = group.members.filter(id => id !== this.state.user.id);
+                    group.admins = group.admins.filter(id => id !== this.state.user.id);
+                    this.saveAll();
+                    this.render();
                 }
-                
-                this.state.user = null;
-                this.state.page = 'login';
-                localStorage.removeItem('jalaabad_user');
-                this.render();
+            }
+            
+            // MODERATION FUNCTIONS
+            checkBadWords(text) {
+                const lowerText = text.toLowerCase();
+                for (const word of this.state.badWords) {
+                    if (lowerText.includes(word.toLowerCase())) {
+                        return word;
+                    }
+                }
+                return null;
             }
             
             sendMessage() {
                 if (!this.state.newMessage.trim()) return;
+                
+                // Check for bad words
+                const badWord = this.checkBadWords(this.state.newMessage);
+                if (badWord && this.state.user.role !== 'admin' && this.state.user.role !== 'superadmin') {
+                    if (confirm(`"${badWord}" созу жазылбашы керек! Жөнөтөйүнбу?`)) {
+                        // Continue sending
+                    } else {
+                        return;
+                    }
+                }
                 
                 const message = {
                     id: Date.now().toString(),
@@ -315,67 +428,113 @@
                     senderName: this.state.user.username,
                     senderAvatar: this.state.user.avatar,
                     senderStatus: this.state.user.status,
-                    senderCustomStatus: this.state.user.customStatus,
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    date: new Date().toLocaleDateString()
+                    date: new Date().toLocaleDateString(),
+                    hasBadWord: !!badWord,
+                    reported: false
                 };
                 
-                this.state.messages.push(message);
-                this.state.newMessage = '';
-                this.saveMessages();
-                this.render();
-                
-                // Auto scroll to bottom
-                setTimeout(() => {
-                    const chatContainer = document.querySelector('.chat-container');
-                    if (chatContainer) {
-                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                // Save based on chat type
+                if (this.state.chatType === 'public') {
+                    this.state.messages.push(message);
+                } else if (this.state.chatType === 'private' && this.state.selectedChat) {
+                    this.state.privateMessages.push({
+                        ...message,
+                        receiverId: this.state.selectedChat
+                    });
+                } else if (this.state.chatType === 'group' && this.state.selectedChat) {
+                    if (!this.state.groupMessages[this.state.selectedChat]) {
+                        this.state.groupMessages[this.state.selectedChat] = [];
                     }
-                }, 100);
+                    this.state.groupMessages[this.state.selectedChat].push(message);
+                }
+                
+                this.state.newMessage = '';
+                this.saveAll();
+                this.render();
             }
             
-            // Admin functions
-            updateUserStatus(userId, status, customStatus = '') {
+            // REPORT MESSAGE
+            reportMessage(messageId, chatType, chatId) {
+                const reportedMsg = {
+                    messageId,
+                    chatType,
+                    chatId,
+                    reportedBy: this.state.user.id,
+                    reportedAt: new Date().toISOString(),
+                    status: 'pending'
+                };
+                
+                this.state.reportedMessages.push(reportedMsg);
+                this.saveAll();
+                alert('Билдирүү каралууга жөнөтүлдү!');
+            }
+            
+            // TEMPORARY BLOCK USER
+            tempBlockUser(userId, minutes = 60) {
+                const blockUntil = Date.now() + (minutes * 60000);
+                this.state.tempBlocks[userId] = blockUntil;
+                
                 const user = this.state.users.find(u => u.id === userId);
                 if (user) {
-                    user.status = status;
-                    user.customStatus = customStatus;
-                    
-                    // Update role based on status
-                    if (status === 'creator') user.role = 'superadmin';
-                    else if (status === 'admin') user.role = 'admin';
-                    else if (status === 'moderator') user.role = 'moderator';
-                    else user.role = 'user';
-                    
-                    // If updating current user, update state
-                    if (this.state.user && this.state.user.id === userId) {
-                        this.state.user = { ...this.state.user, ...user };
-                        this.saveUser();
+                    user.isOnline = false;
+                }
+                
+                this.saveAll();
+                this.render();
+                
+                alert(`${user?.username || 'Колдонуучу'} ${minutes} мүнөткө блокторулду!`);
+            }
+            
+            // UNBLOCK USER
+            unblockUser(userId) {
+                delete this.state.tempBlocks[userId];
+                const user = this.state.users.find(u => u.id === userId);
+                if (user) {
+                    user.isBlocked = false;
+                }
+                this.saveAll();
+                this.render();
+            }
+            
+            // DELETE MESSAGE (for admins)
+            deleteMessage(messageId, chatType, chatId) {
+                if (confirm('Бул билдирүүнү өчүрүүнү каалайсызбы?')) {
+                    if (chatType === 'public') {
+                        this.state.messages = this.state.messages.filter(m => m.id !== messageId);
+                    } else if (chatType === 'group' && chatId) {
+                        if (this.state.groupMessages[chatId]) {
+                            this.state.groupMessages[chatId] = this.state.groupMessages[chatId].filter(m => m.id !== messageId);
+                        }
                     }
                     
-                    this.saveUsers();
+                    // Remove from reports
+                    this.state.reportedMessages = this.state.reportedMessages.filter(r => r.messageId !== messageId);
+                    
+                    this.saveAll();
                     this.render();
                 }
             }
             
-            blockUser(userId) {
-                const user = this.state.users.find(u => u.id === userId);
-                if (user && user.id !== '1') { // Can't block creator
-                    user.isBlocked = !user.isBlocked;
-                    user.isOnline = !user.isBlocked;
-                    this.saveUsers();
-                    this.render();
-                }
-            }
-            
-            deleteUser(userId) {
-                if (userId === '1') return; // Can't delete creator
-                
-                if (confirm('Бул колдонуучуну өчүрүүнү каалайсызбы?')) {
-                    this.state.users = this.state.users.filter(u => u.id !== userId);
-                    this.saveUsers();
-                    this.render();
-                }
+            // VIEW PRIVATE CHATS (for admins)
+            getPrivateChats() {
+                const chats = {};
+                this.state.privateMessages.forEach(msg => {
+                    const chatId = [msg.senderId, msg.receiverId].sort().join('_');
+                    if (!chats[chatId]) {
+                        const user1 = this.state.users.find(u => u.id === msg.senderId);
+                        const user2 = this.state.users.find(u => u.id === msg.receiverId);
+                        chats[chatId] = {
+                            user1: user1?.username || 'Белгисиз',
+                            user2: user2?.username || 'Белгисиз',
+                            userId1: msg.senderId,
+                            userId2: msg.receiverId,
+                            messages: []
+                        };
+                    }
+                    chats[chatId].messages.push(msg);
+                });
+                return Object.values(chats);
             }
             
             getStatusBadge(status, customStatus = '') {
@@ -388,25 +547,32 @@
                 return `<span class="px-2 py-1 rounded-full text-xs font-medium status-${status}">${statusText}</span>`;
             }
             
+            logout() {
+                if (this.state.user) {
+                    const user = this.state.users.find(u => u.id === this.state.user.id);
+                    if (user) user.isOnline = false;
+                }
+                
+                this.state.user = null;
+                this.state.page = 'login';
+                localStorage.removeItem('jalaabad_user');
+                this.saveAll();
+                this.render();
+            }
+            
+            // RENDER FUNCTIONS
             render() {
                 const app = document.getElementById('app');
                 
                 switch(this.state.page) {
-                    case 'login':
-                        app.innerHTML = this.renderLogin();
-                        break;
-                    case 'register':
-                        app.innerHTML = this.renderRegister();
-                        break;
-                    case 'chat':
-                        app.innerHTML = this.renderChat();
-                        break;
-                    case 'admin':
-                        app.innerHTML = this.renderAdmin();
-                        break;
-                    case 'editStatus':
-                        app.innerHTML = this.renderEditStatus();
-                        break;
+                    case 'login': app.innerHTML = this.renderLogin(); break;
+                    case 'register': app.innerHTML = this.renderRegister(); break;
+                    case 'chat': app.innerHTML = this.renderChat(); break;
+                    case 'groups': app.innerHTML = this.renderGroups(); break;
+                    case 'createGroup': app.innerHTML = this.renderCreateGroup(); break;
+                    case 'admin': app.innerHTML = this.renderAdmin(); break;
+                    case 'moderation': app.innerHTML = this.renderModeration(); break;
+                    case 'privateChats': app.innerHTML = this.renderPrivateChats(); break;
                 }
             }
             
@@ -419,24 +585,22 @@
                                     <i class="fas fa-mountains text-white text-3xl"></i>
                                 </div>
                                 <h1 class="text-3xl font-bold text-gray-800">Jalaabad Chat</h1>
-                                <p class="text-gray-600 mt-2">Жалалабад Колледждин расмий чаты</p>
-                                <p class="text-sm text-gray-500 mt-1">3-курс долбоору</p>
+                                <p class="text-gray-600 mt-2">Жалалабад Колледждин чат системасы</p>
                             </div>
                             
                             <form onsubmit="event.preventDefault(); app.login(
-                                document.getElementById('loginPhone').value,
+                                document.getElementById('loginInput').value,
                                 document.getElementById('loginPass').value
                             )" class="space-y-6">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">
-                                        <i class="fas fa-phone mr-2"></i>Телефон номер
+                                        <i class="fas fa-user mr-2"></i>Логин
                                     </label>
                                     <input
-                                        type="tel"
-                                        id="loginPhone"
+                                        type="text"
+                                        id="loginInput"
                                         class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="+996 XXX XXX XXX"
-                                        value="+996555123456"
+                                        placeholder="Логинүз"
                                         required
                                     />
                                 </div>
@@ -450,7 +614,6 @@
                                         id="loginPass"
                                         class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                         placeholder="Сырсөзүңүз"
-                                        value="SuperAdmin123"
                                         required
                                     />
                                 </div>
@@ -473,9 +636,10 @@
                                 <div class="text-center text-sm text-gray-600 border-t pt-4">
                                     <p class="font-semibold mb-2">Тест аккаунттар:</p>
                                     <div class="space-y-1 text-xs">
-                                        <p>👑 <strong>Создатель:</strong> +996555123456 / SuperAdmin123</p>
-                                        <p>🛡️ <strong>Админ:</strong> +996555000001 / admin123</p>
-                                        <p>⭐ <strong>VIP:</strong> +996555000002 / vip123</p>
+                                        <p>👑 <strong>exm_404</strong> / eluxa (Создатель)</p>
+                                        <p>🛡️ <strong>admin</strong> / admin123 (Админ)</p>
+                                        <p>🛡️ <strong>moderator</strong> / mod123 (Модератор)</p>
+                                        <p>⭐ <strong>vip</strong> / vip123 (VIP студент)</p>
                                     </div>
                                 </div>
                             </form>
@@ -490,53 +654,36 @@
                         <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
                             <div class="text-center mb-6">
                                 <h1 class="text-2xl font-bold text-gray-800">Жаңы катталуу</h1>
-                                <p class="text-gray-600">Жалалабад Колледж студенти болуп катталыңыз</p>
-                            </div>
-                            
-                            <!-- Avatar Upload -->
-                            <div class="mb-6">
-                                <div class="avatar-upload">
-                                    <img src="${this.state.regAvatar}" alt="Avatar" id="avatarPreview">
-                                    <input type="file" accept="image/*" onchange="app.uploadAvatar(event)">
-                                </div>
-                                <p class="text-center text-sm text-gray-500 mt-2">
-                                    Сүрөтүңүздү жүктөө үчүн чыкылдатыңыз (max 2MB)
-                                </p>
+                                <p class="text-gray-600">Jalaabad Chat системасына катталыңыз</p>
                             </div>
                             
                             <form onsubmit="event.preventDefault(); app.register();" class="space-y-4">
-                                <div>
-                                    <input
-                                        type="text"
-                                        value="${this.state.regUsername}"
-                                        oninput="app.state.regUsername=this.value"
-                                        class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Толук аты-жөнүңүз"
-                                        required
-                                    />
-                                </div>
+                                <input
+                                    type="text"
+                                    value="${this.state.regUsername}"
+                                    oninput="app.state.regUsername=this.value"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-3"
+                                    placeholder="Толук аты-жөнүңүз"
+                                    required
+                                />
                                 
-                                <div>
-                                    <input
-                                        type="tel"
-                                        value="${this.state.regPhone}"
-                                        oninput="app.state.regPhone=this.value"
-                                        class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Телефон номериңиз"
-                                        required
-                                    />
-                                </div>
+                                <input
+                                    type="text"
+                                    value="${this.state.regLogin}"
+                                    oninput="app.state.regLogin=this.value"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-3"
+                                    placeholder="Логин (колдонуучу аты)"
+                                    required
+                                />
                                 
-                                <div>
-                                    <input
-                                        type="password"
-                                        value="${this.state.regPassword}"
-                                        oninput="app.state.regPassword=this.value"
-                                        class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        placeholder="Купуя сырсөз"
-                                        required
-                                    />
-                                </div>
+                                <input
+                                    type="password"
+                                    value="${this.state.regPassword}"
+                                    oninput="app.state.regPassword=this.value"
+                                    class="w-full border border-gray-300 rounded-lg px-4 py-3"
+                                    placeholder="Купуя сырсөз"
+                                    required
+                                />
                                 
                                 <div class="flex gap-3 pt-2">
                                     <button
@@ -561,329 +708,529 @@
             }
             
             renderChat() {
-                const onlineUsers = this.state.users.filter(u => u.isOnline);
-                const allUsers = this.state.users.sort((a, b) => {
-                    // Sort by status priority
-                    const statusOrder = { creator: 0, admin: 1, moderator: 2, vip: 3, user: 4 };
-                    return statusOrder[a.status] - statusOrder[b.status];
-                });
+                const currentMessages = this.state.chatType === 'public' ? this.state.messages :
+                                      this.state.chatType === 'private' ? 
+                                        this.state.privateMessages.filter(m => 
+                                            m.senderId === this.state.selectedChat || 
+                                            m.receiverId === this.state.selectedChat
+                                        ) :
+                                      this.state.chatType === 'group' && this.state.selectedChat ?
+                                        this.state.groupMessages[this.state.selectedChat] || [] : [];
+                
+                const currentUser = this.state.selectedChat && this.state.chatType === 'private' ? 
+                    this.state.users.find(u => u.id === this.state.selectedChat) : null;
+                
+                const currentGroup = this.state.selectedChat && this.state.chatType === 'group' ?
+                    this.state.groups.find(g => g.id === this.state.selectedChat) : null;
                 
                 return `
                     <div class="flex h-screen bg-gray-100">
-                        <!-- Sidebar -->
-                        <div class="w-20 bg-white border-r flex flex-col items-center py-4">
-                            <div class="mb-8">
+                        <!-- Left Sidebar - Chats -->
+                        <div class="w-20 bg-white border-r flex flex-col">
+                            <div class="p-4">
                                 <div class="gradient-bg w-12 h-12 rounded-lg flex items-center justify-center">
                                     <i class="fas fa-mountains text-white text-xl"></i>
                                 </div>
                             </div>
                             
-                            <div class="flex-1 space-y-4">
-                                <button class="p-3 text-blue-600 hover:bg-blue-50 rounded-lg" title="Чат">
-                                    <i class="fas fa-comments text-xl"></i>
+                            <div class="flex-1 py-4 space-y-2">
+                                <!-- Public Chat -->
+                                <button onclick="app.state.chatType='public'; app.state.selectedChat=null; app.render();"
+                                        class="w-full p-3 ${this.state.chatType==='public'?'bg-blue-50 text-blue-600':'text-gray-500'} hover:bg-gray-100">
+                                    <i class="fas fa-globe"></i>
                                 </button>
                                 
-                                ${(this.state.user.role === 'superadmin' || this.state.user.role === 'admin') ? `
-                                    <button 
-                                        onclick="app.state.page='admin'; app.render();"
-                                        class="p-3 text-gray-500 hover:bg-gray-100 rounded-lg" 
-                                        title="Админ панели"
-                                    >
-                                        <i class="fas fa-shield-alt text-xl"></i>
+                                <!-- Groups -->
+                                <button onclick="app.state.page='groups'; app.render();"
+                                        class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                    <i class="fas fa-users"></i>
+                                </button>
+                                
+                                <!-- Admin Panel -->
+                                ${this.state.user.role === 'admin' || this.state.user.role === 'superadmin' ? `
+                                    <button onclick="app.state.page='admin'; app.render();"
+                                            class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                        <i class="fas fa-shield-alt"></i>
                                     </button>
                                 ` : ''}
                             </div>
                             
-                            <div class="mt-auto">
-                                <div class="relative mb-4">
-                                    <img src="${this.state.user.avatar}" class="w-10 h-10 rounded-full border-2 border-blue-500">
+                            <!-- User Profile -->
+                            <div class="p-4 border-t">
+                                <div class="relative">
+                                    <img src="${this.state.user.avatar}" class="w-10 h-10 rounded-full">
                                     <div class="online-dot"></div>
                                 </div>
-                                <button 
-                                    onclick="app.logout()"
-                                    class="p-2 text-gray-500 hover:text-red-600" 
-                                    title="Чыгуу"
-                                >
+                                <button onclick="app.logout()" class="w-full mt-4 p-2 text-gray-500 hover:text-red-600">
                                     <i class="fas fa-sign-out-alt"></i>
                                 </button>
                             </div>
                         </div>
                         
-                        <!-- Main Content -->
+                        <!-- Middle - Chat List -->
+                        <div class="w-64 bg-white border-r">
+                            <div class="p-4 border-b">
+                                <h2 class="font-semibold text-gray-800">Чаттар</h2>
+                            </div>
+                            
+                            <div class="overflow-y-auto h-full">
+                                <!-- Public Chat -->
+                                <div onclick="app.state.chatType='public'; app.state.selectedChat=null; app.render();"
+                                     class="p-3 border-b hover:bg-gray-50 cursor-pointer ${this.state.chatType==='public'?'bg-blue-50':''}">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                            <i class="fas fa-globe text-blue-600"></i>
+                                        </div>
+                                        <div>
+                                            <div class="font-medium">Жалпы чат</div>
+                                            <div class="text-xs text-gray-500">${this.state.messages.length} билдирүү</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Users for Private Chat -->
+                                <div class="p-2 text-xs text-gray-500 font-medium">Жеке чаттар</div>
+                                ${this.state.users.filter(u => u.id !== this.state.user.id).map(user => `
+                                    <div onclick="app.state.chatType='private'; app.state.selectedChat='${user.id}'; app.render();"
+                                         class="p-3 hover:bg-gray-50 cursor-pointer ${this.state.chatType==='private'&&this.state.selectedChat===user.id?'bg-blue-50':''}">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-3">
+                                                <div class="relative">
+                                                    <img src="${user.avatar}" class="w-8 h-8 rounded-full">
+                                                    ${user.isOnline && !this.state.tempBlocks[user.id] ? '<div class="online-dot"></div>' : ''}
+                                                </div>
+                                                <div>
+                                                    <div class="font-medium">${user.username}</div>
+                                                    <div class="text-xs text-gray-500">${user.status}</div>
+                                                </div>
+                                            </div>
+                                            ${this.state.tempBlocks[user.id] ? '<span class="text-xs text-red-600">🚫</span>' : ''}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        
+                        <!-- Main Chat Area -->
                         <div class="flex-1 flex flex-col">
-                            <!-- Header -->
+                            <!-- Chat Header -->
                             <div class="bg-white border-b p-4">
                                 <div class="flex items-center justify-between">
-                                    <div>
-                                        <h1 class="text-xl font-bold text-gray-800">Jalaabad Чат</h1>
-                                        <p class="text-sm text-gray-600">
-                                            ${onlineUsers.length} онлайн • ${this.state.messages.length} билдирүү
-                                        </p>
+                                    <div class="flex items-center gap-3">
+                                        ${this.state.chatType === 'public' ? `
+                                            <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                                <i class="fas fa-globe text-blue-600"></i>
+                                            </div>
+                                            <div>
+                                                <h1 class="text-xl font-bold text-gray-800">Жалпы чат</h1>
+                                                <p class="text-sm text-gray-600">Бардык колдонуучулар</p>
+                                            </div>
+                                        ` : this.state.chatType === 'private' && currentUser ? `
+                                            <img src="${currentUser.avatar}" class="w-10 h-10 rounded-full">
+                                            <div>
+                                                <h1 class="text-xl font-bold text-gray-800">${currentUser.username}</h1>
+                                                <p class="text-sm text-gray-600">Жеке чат</p>
+                                            </div>
+                                        ` : this.state.chatType === 'group' && currentGroup ? `
+                                            <div class="w-10 h-10 rounded-full ${currentGroup.color} flex items-center justify-center text-white">
+                                                ${currentGroup.avatar}
+                                            </div>
+                                            <div>
+                                                <h1 class="text-xl font-bold text-gray-800">${currentGroup.name}</h1>
+                                                <p class="text-sm text-gray-600">${currentGroup.description}</p>
+                                            </div>
+                                        ` : ''}
                                     </div>
                                     
-                                    <div class="flex items-center gap-4">
+                                    <div class="flex items-center gap-3">
                                         <div class="text-right">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-semibold">${this.state.user.username}</span>
-                                                ${this.getStatusBadge(this.state.user.status, this.state.user.customStatus)}
-                                            </div>
-                                            <div class="text-sm text-gray-500">${this.state.user.phone}</div>
+                                            <div class="font-medium">${this.state.user.username}</div>
+                                            <div class="text-xs text-gray-500">${this.state.user.role}</div>
                                         </div>
-                                        <div class="relative">
-                                            <img src="${this.state.user.avatar}" class="w-10 h-10 rounded-full">
-                                            <div class="online-dot"></div>
-                                        </div>
+                                        <img src="${this.state.user.avatar}" class="w-10 h-10 rounded-full">
                                     </div>
                                 </div>
                             </div>
                             
-                            <!-- Chat Area -->
-                            <div class="flex-1 flex">
-                                <!-- Messages -->
-                                <div class="flex-1 flex flex-col">
-                                    <div class="flex-1 overflow-y-auto p-4 space-y-4 chat-container">
-                                        ${this.state.messages.map(msg => {
-                                            const sender = this.state.users.find(u => u.id === msg.senderId) || {};
-                                            return `
-                                                <div class="${msg.senderId === this.state.user.id ? 'text-right' : 'text-left'}">
-                                                    <div class="inline-block max-w-xs lg:max-w-md">
-                                                        <div class="flex items-center gap-2 mb-1 ${msg.senderId === this.state.user.id ? 'justify-end' : 'justify-start'}">
-                                                            ${msg.senderId !== this.state.user.id ? `
-                                                                <img src="${sender.avatar || msg.senderAvatar}" class="w-6 h-6 rounded-full">
-                                                            ` : ''}
-                                                            <span class="font-medium">${msg.senderId === this.state.user.id ? 'Сиз' : msg.senderName}</span>
-                                                            ${this.getStatusBadge(msg.senderStatus || 'user', msg.senderCustomStatus)}
-                                                            <span class="text-xs text-gray-500">${msg.timestamp}</span>
-                                                        </div>
-                                                        <div class="message-bubble ${msg.senderId === this.state.user.id ? 'sent' : 'received'} px-4 py-3">
-                                                            ${msg.text}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            `;
-                                        }).join('')}
-                                    </div>
+                            <!-- Messages -->
+                            <div class="flex-1 overflow-y-auto p-4 space-y-3">
+                                ${currentMessages.map(msg => {
+                                    const sender = this.state.users.find(u => u.id === msg.senderId);
+                                    const isTempBlocked = this.state.tempBlocks[msg.senderId];
                                     
-                                    <!-- Message Input -->
-                                    <div class="border-t bg-white p-4">
-                                        <form onsubmit="event.preventDefault(); app.sendMessage();" class="flex gap-2">
-                                            <input
-                                                type="text"
-                                                value="${this.state.newMessage}"
-                                                oninput="app.state.newMessage=this.value"
-                                                onkeypress="if(event.key==='Enter' && !event.shiftKey) {event.preventDefault(); app.sendMessage();}"
-                                                class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                placeholder="Билдирүү жазыңыз (Enter - жөнөтүү)"
-                                                autofocus
-                                            />
-                                            <button
-                                                type="submit"
-                                                class="gradient-bg text-white px-6 py-3 rounded-lg hover:opacity-90 flex items-center gap-2"
-                                            >
-                                                <i class="fas fa-paper-plane"></i>
-                                                <span class="hidden sm:inline">Жөнөтүү</span>
-                                            </button>
-                                        </form>
-                                    </div>
-                                </div>
-                                
-                                <!-- Online Users -->
-                                <div class="hidden lg:block w-64 border-l bg-white p-4">
-                                    <h3 class="font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                                        <i class="fas fa-users"></i>
-                                        Онлайн колдонуучулар (${onlineUsers.length})
-                                    </h3>
-                                    <div class="space-y-3">
-                                        ${allUsers.map(user => `
-                                            <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg">
-                                                <div class="flex items-center gap-3">
-                                                    <div class="relative">
-                                                        <img src="${user.avatar}" class="w-8 h-8 rounded-full">
-                                                        ${user.isOnline ? '<div class="online-dot"></div>' : ''}
-                                                    </div>
-                                                    <div class="flex-1 min-w-0">
-                                                        <div class="flex items-center gap-1">
-                                                            <span class="font-medium truncate">${user.username}</span>
-                                                            ${user.isBlocked ? '<span class="text-xs text-red-600">(блок)</span>' : ''}
-                                                        </div>
-                                                        <div class="text-xs text-gray-500 truncate">
-                                                            ${this.getStatusBadge(user.status, user.customStatus)}
-                                                        </div>
-                                                    </div>
+                                    return `
+                                        <div class="${msg.senderId === this.state.user.id ? 'text-right' : 'text-left'} ${isTempBlocked ? 'temp-blocked' : ''}">
+                                            <div class="inline-block max-w-xs lg:max-w-md">
+                                                <div class="flex items-center gap-2 mb-1 ${msg.senderId === this.state.user.id ? 'justify-end' : 'justify-start'}">
+                                                    ${msg.senderId !== this.state.user.id ? `
+                                                        <img src="${sender?.avatar || msg.senderAvatar}" class="w-6 h-6 rounded-full">
+                                                    ` : ''}
+                                                    <span class="font-medium">${msg.senderId === this.state.user.id ? 'Сиз' : msg.senderName}</span>
+                                                    <span class="text-xs text-gray-500">${msg.timestamp}</span>
+                                                    ${msg.hasBadWord ? '<span class="text-xs text-red-600">⚠️</span>' : ''}
+                                                    ${this.state.user.role === 'admin' || this.state.user.role === 'superadmin' ? `
+                                                        <button onclick="app.reportMessage('${msg.id}', '${this.state.chatType}', '${this.state.selectedChat}')" 
+                                                                class="text-xs text-gray-400 hover:text-red-600">
+                                                            <i class="fas fa-flag"></i>
+                                                        </button>
+                                                    ` : ''}
+                                                </div>
+                                                <div class="message-bubble ${msg.senderId === this.state.user.id ? 'sent' : 'received'} px-4 py-3">
+                                                    ${msg.hasBadWord ? `<span class="bad-word">${msg.text}</span>` : msg.text}
                                                 </div>
                                             </div>
-                                        `).join('')}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                            
+                            <!-- Message Input -->
+                            <div class="border-t bg-white p-4">
+                                <form onsubmit="event.preventDefault(); app.sendMessage();" class="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value="${this.state.newMessage}"
+                                        oninput="app.state.newMessage=this.value"
+                                        onkeypress="if(event.key==='Enter' && !event.shiftKey) {event.preventDefault(); app.sendMessage();}"
+                                        class="flex-1 border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="Билдирүү жазыңыз..."
+                                        ${this.state.tempBlocks[this.state.user.id] ? 'disabled' : ''}
+                                    />
+                                    <button
+                                        type="submit"
+                                        class="gradient-bg text-white px-6 py-3 rounded-lg hover:opacity-90 disabled:opacity-50"
+                                        ${this.state.tempBlocks[this.state.user.id] ? 'disabled' : ''}
+                                    >
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </form>
+                                ${this.state.tempBlocks[this.state.user.id] ? `
+                                    <div class="text-center text-sm text-red-600 mt-2">
+                                        🚫 Сиз убактылуу блокторулдуңуз!
                                     </div>
-                                </div>
+                                ` : ''}
                             </div>
                         </div>
                     </div>
                 `;
             }
             
-            renderAdmin() {
-                const totalUsers = this.state.users.length;
-                const onlineUsers = this.state.users.filter(u => u.isOnline).length;
-                const blockedUsers = this.state.users.filter(u => u.isBlocked).length;
+            renderGroups() {
+                const myGroups = this.state.groups.filter(g => g.members.includes(this.state.user.id));
+                const otherGroups = this.state.groups.filter(g => !g.members.includes(this.state.user.id) && g.isPublic);
                 
                 return `
                     <div class="flex h-screen bg-gray-100">
                         <!-- Sidebar -->
-                        <div class="w-20 bg-white border-r flex flex-col items-center py-4">
+                        <div class="w-20 bg-white border-r flex flex-col">
+                            <div class="p-4">
+                                <div class="gradient-bg w-12 h-12 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-mountains text-white text-xl"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="flex-1 py-4 space-y-2">
+                                <button onclick="app.state.page='chat'; app.render();"
+                                        class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                    <i class="fas fa-arrow-left"></i>
+                                </button>
+                                
+                                <button onclick="app.state.page='createGroup'; app.render();"
+                                        class="w-full p-3 text-green-600 hover:bg-green-50">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Groups List -->
+                        <div class="flex-1 p-6 overflow-y-auto">
                             <div class="mb-8">
+                                <h1 class="text-2xl font-bold text-gray-800">Группалар</h1>
+                                <p class="text-gray-600">Группаларды башкаруу жана катышуу</p>
+                            </div>
+                            
+                            <!-- My Groups -->
+                            <div class="mb-8">
+                                <h2 class="text-lg font-semibold text-gray-800 mb-4">Менин группаларым</h2>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                    ${myGroups.map(group => {
+                                        const memberCount = group.members.length;
+                                        const isAdmin = group.admins.includes(this.state.user.id);
+                                        return `
+                                            <div class="bg-white rounded-xl border p-4 hover:shadow-md transition-shadow">
+                                                <div class="flex items-center gap-3 mb-3">
+                                                    <div class="w-12 h-12 rounded-full ${group.color} flex items-center justify-center text-white text-xl">
+                                                        ${group.avatar}
+                                                    </div>
+                                                    <div>
+                                                        <h3 class="font-bold text-gray-800">${group.name}</h3>
+                                                        <p class="text-sm text-gray-500">${memberCount} мүчө</p>
+                                                    </div>
+                                                </div>
+                                                <p class="text-sm text-gray-600 mb-4">${group.description || 'Сүрөттөлгөн жок'}</p>
+                                                <div class="flex justify-between">
+                                                    <button onclick="app.state.chatType='group'; app.state.selectedChat='${group.id}'; app.state.page='chat'; app.render();"
+                                                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                                        Чатка өтүү
+                                                    </button>
+                                                    ${isAdmin ? `
+                                                        <span class="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
+                                                            Админ
+                                                        </span>
+                                                    ` : `
+                                                        <button onclick="app.leaveGroup('${group.id}')"
+                                                                class="px-3 py-1 border border-gray-300 text-gray-700 rounded text-sm">
+                                                            Чыгуу
+                                                        </button>
+                                                    `}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                            
+                            <!-- Available Groups -->
+                            ${otherGroups.length > 0 ? `
+                                <div>
+                                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Кошулууга боло турган группалар</h2>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        ${otherGroups.map(group => `
+                                            <div class="bg-white rounded-xl border p-4">
+                                                <div class="flex items-center gap-3 mb-3">
+                                                    <div class="w-12 h-12 rounded-full ${group.color} flex items-center justify-center text-white text-xl">
+                                                        ${group.avatar}
+                                                    </div>
+                                                    <div>
+                                                        <h3 class="font-bold text-gray-800">${group.name}</h3>
+                                                        <p class="text-sm text-gray-500">${group.members.length} мүчө</p>
+                                                    </div>
+                                                </div>
+                                                <button onclick="app.joinGroup('${group.id}')"
+                                                        class="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                                                    Кошулуу
+                                                </button>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            renderCreateGroup() {
+                const availableUsers = this.state.users.filter(u => u.id !== this.state.user.id);
+                
+                return `
+                    <div class="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+                        <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+                            <div class="text-center mb-6">
+                                <h1 class="text-2xl font-bold text-gray-800">Жаңы группа</h1>
+                                <p class="text-gray-600">Группа түзүү жана мүчөлөрдү чакыруу</p>
+                            </div>
+                            
+                            <form onsubmit="event.preventDefault(); app.createGroup();" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Группанын аты</label>
+                                    <input type="text" value="${this.state.newGroupName}"
+                                           oninput="app.state.newGroupName=this.value"
+                                           class="w-full border border-gray-300 rounded-lg px-4 py-3"
+                                           placeholder="Группанын аты" required>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Сүрөттөмө</label>
+                                    <textarea oninput="app.state.newGroupDesc=this.value"
+                                              class="w-full border border-gray-300 rounded-lg px-4 py-3"
+                                              placeholder="Группанын сүрөттөмөсү"
+                                              rows="3">${this.state.newGroupDesc}</textarea>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Мүчөлөрдү тандаңыз</label>
+                                    <div class="space-y-2 max-h-40 overflow-y-auto p-2 border rounded">
+                                        ${availableUsers.map(user => `
+                                            <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                                                <div class="flex items-center gap-3">
+                                                    <img src="${user.avatar}" class="w-8 h-8 rounded-full">
+                                                    <span>${user.username}</span>
+                                                </div>
+                                                <input type="checkbox" 
+                                                       ${this.state.selectedGroupMembers.includes(user.id) ? 'checked' : ''}
+                                                       onchange="if(this.checked) app.state.selectedGroupMembers.push('${user.id}');
+                                                                else app.state.selectedGroupMembers = app.state.selectedGroupMembers.filter(id => id !== '${user.id}')">
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                
+                                <div class="flex gap-3 pt-4">
+                                    <button type="submit"
+                                            class="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white font-semibold py-3 rounded-lg hover:opacity-90">
+                                        Группа түзүү
+                                    </button>
+                                    
+                                    <button type="button"
+                                            onclick="app.state.page='groups'; app.render();"
+                                            class="flex-1 border-2 border-gray-300 text-gray-700 font-semibold py-3 rounded-lg hover:bg-gray-50">
+                                        Артка
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            renderAdmin() {
+                const onlineUsers = this.state.users.filter(u => u.isOnline && !this.state.tempBlocks[u.id]);
+                const tempBlockedUsers = this.state.users.filter(u => this.state.tempBlocks[u.id]);
+                const reportedCount = this.state.reportedMessages.filter(r => r.status === 'pending').length;
+                
+                return `
+                    <div class="flex h-screen bg-gray-100">
+                        <!-- Sidebar -->
+                        <div class="w-20 bg-white border-r flex flex-col">
+                            <div class="p-4">
                                 <div class="bg-red-600 w-12 h-12 rounded-lg flex items-center justify-center">
                                     <i class="fas fa-shield-alt text-white text-xl"></i>
                                 </div>
                             </div>
                             
-                            <div class="flex-1 space-y-4">
-                                <button 
-                                    onclick="app.state.page='chat'; app.render();"
-                                    class="p-3 text-gray-500 hover:bg-gray-100 rounded-lg"
-                                    title="Чатка кайтуу"
-                                >
-                                    <i class="fas fa-arrow-left text-xl"></i>
+                            <div class="flex-1 py-4 space-y-2">
+                                <button onclick="app.state.page='chat'; app.render();"
+                                        class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                    <i class="fas fa-arrow-left"></i>
                                 </button>
+                                
+                                <button onclick="app.state.page='moderation'; app.render();"
+                                        class="w-full p-3 ${reportedCount > 0 ? 'text-red-600' : 'text-gray-500'} hover:bg-gray-100">
+                                    <i class="fas fa-flag"></i>
+                                    ${reportedCount > 0 ? `<span class="absolute top-2 right-2 w-2 h-2 bg-red-600 rounded-full"></span>` : ''}
+                                </button>
+                                
+                                ${this.state.user.role === 'superadmin' ? `
+                                    <button onclick="app.state.page='privateChats'; app.render();"
+                                            class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                ` : ''}
                             </div>
                         </div>
                         
                         <!-- Admin Panel -->
                         <div class="flex-1 p-6 overflow-y-auto">
                             <div class="mb-8">
-                                <h1 class="text-3xl font-bold text-gray-800 flex items-center gap-3">
+                                <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-3">
                                     <i class="fas fa-shield-alt text-red-600"></i>
                                     Админ Панели
                                 </h1>
-                                <p class="text-gray-600 mt-2">
-                                    Жалалабад Колледждин башкаруу системасы
-                                </p>
+                                <p class="text-gray-600 mt-2">Колдонуучуларды башкаруу жана модерация</p>
                                 <div class="flex items-center gap-2 mt-3">
                                     <span class="px-3 py-1 bg-gradient-to-r from-red-600 to-orange-600 text-white rounded-full text-sm">
-                                        Создатель: eXM_404
+                                        ${this.state.user.username}
                                     </span>
-                                    <span class="text-sm text-gray-500">VIP мүмкүнчүлүктөрү активдүү</span>
+                                    <span class="text-sm text-gray-500">${this.state.user.role === 'superadmin' ? 'Создатель' : 'Админ'}</span>
                                 </div>
                             </div>
                             
                             <!-- Stats -->
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                                <div class="bg-white p-6 rounded-xl shadow border">
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                                <div class="bg-white p-4 rounded-xl border">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <p class="text-gray-500 text-sm">Жалпы колдонуучулар</p>
-                                            <p class="text-3xl font-bold mt-2">${totalUsers}</p>
+                                            <p class="text-gray-500 text-sm">Онлайн</p>
+                                            <p class="text-2xl font-bold mt-1">${onlineUsers.length}</p>
                                         </div>
-                                        <i class="fas fa-users text-blue-500 text-2xl"></i>
+                                        <i class="fas fa-users text-green-500"></i>
                                     </div>
                                 </div>
                                 
-                                <div class="bg-white p-6 rounded-xl shadow border">
+                                <div class="bg-white p-4 rounded-xl border">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <p class="text-gray-500 text-sm">Онлайн колдонуучулар</p>
-                                            <p class="text-3xl font-bold mt-2 text-green-600">${onlineUsers}</p>
+                                            <p class="text-gray-500 text-sm">Блокторулган</p>
+                                            <p class="text-2xl font-bold mt-1 text-red-600">${tempBlockedUsers.length}</p>
                                         </div>
-                                        <i class="fas fa-signal text-green-500 text-2xl"></i>
+                                        <i class="fas fa-ban text-red-500"></i>
                                     </div>
                                 </div>
                                 
-                                <div class="bg-white p-6 rounded-xl shadow border">
+                                <div class="bg-white p-4 rounded-xl border">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <p class="text-gray-500 text-sm">Блокторулгандар</p>
-                                            <p class="text-3xl font-bold mt-2 text-red-600">${blockedUsers}</p>
+                                            <p class="text-gray-500 text-sm">Кароосуз</p>
+                                            <p class="text-2xl font-bold mt-1 text-orange-600">${reportedCount}</p>
                                         </div>
-                                        <i class="fas fa-ban text-red-500 text-2xl"></i>
+                                        <i class="fas fa-flag text-orange-500"></i>
                                     </div>
                                 </div>
                                 
-                                <div class="bg-white p-6 rounded-xl shadow border">
+                                <div class="bg-white p-4 rounded-xl border">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <p class="text-gray-500 text-sm">Билдирүүлөр</p>
-                                            <p class="text-3xl font-bold mt-2">${this.state.messages.length}</p>
+                                            <p class="text-gray-500 text-sm">Группалар</p>
+                                            <p class="text-2xl font-bold mt-1">${this.state.groups.length}</p>
                                         </div>
-                                        <i class="fas fa-comments text-purple-500 text-2xl"></i>
+                                        <i class="fas fa-users-cog text-blue-500"></i>
                                     </div>
                                 </div>
                             </div>
                             
-                            <!-- Users Management -->
-                            <div class="bg-white rounded-xl shadow border">
-                                <div class="p-6 border-b">
-                                    <h2 class="text-xl font-semibold text-gray-800 flex items-center gap-2">
-                                        <i class="fas fa-user-cog"></i>
-                                        Колдонуучуларды башкаруу
-                                    </h2>
-                                    <p class="text-gray-600 text-sm mt-1">
-                                        Статусту өзгөртүү, блоктоо, өчүрүү
-                                    </p>
+                            <!-- User Management -->
+                            <div class="bg-white rounded-xl border mb-8">
+                                <div class="p-4 border-b">
+                                    <h2 class="text-lg font-semibold text-gray-800">Колдонуучулар</h2>
                                 </div>
                                 
                                 <div class="overflow-x-auto">
-                                    <table class="min-w-full divide-y divide-gray-200">
+                                    <table class="min-w-full">
                                         <thead class="bg-gray-50">
                                             <tr>
-                                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Колдонуучу</th>
-                                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Телефон</th>
-                                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Статус</th>
-                                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Катталган</th>
-                                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Аракеттер</th>
+                                                <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">Колдонуучу</th>
+                                                <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">Статус</th>
+                                                <th class="px-4 py-3 text-left text-sm font-medium text-gray-500">Аракеттер</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-gray-200">
+                                        <tbody>
                                             ${this.state.users.map(user => {
-                                                const isCurrentUser = this.state.user && user.id === this.state.user.id;
-                                                const canEdit = this.state.user.role === 'superadmin' || 
-                                                               (this.state.user.role === 'admin' && user.role !== 'superadmin');
+                                                const isTempBlocked = this.state.tempBlocks[user.id];
+                                                const canModerate = this.state.user.role === 'superadmin' || 
+                                                                   (this.state.user.role === 'admin' && user.role !== 'superadmin');
                                                 return `
-                                                    <tr class="hover:bg-gray-50">
-                                                        <td class="px-6 py-4">
-                                                            <div class="flex items-center">
-                                                                <img src="${user.avatar}" class="w-10 h-10 rounded-full">
-                                                                <div class="ml-3">
+                                                    <tr class="border-t hover:bg-gray-50">
+                                                        <td class="px-4 py-3">
+                                                            <div class="flex items-center gap-3">
+                                                                <img src="${user.avatar}" class="w-8 h-8 rounded-full">
+                                                                <div>
                                                                     <div class="font-medium">${user.username}</div>
-                                                                    <div class="text-xs text-gray-500">
-                                                                        ${isCurrentUser ? '(сиз)' : ''}
-                                                                        ${user.isOnline ? '🟢 Онлайн' : '⚫ Офлайн'}
-                                                                    </div>
+                                                                    <div class="text-xs text-gray-500">${user.login}</div>
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td class="px-6 py-4 text-gray-700">${user.phone}</td>
-                                                        <td class="px-6 py-4">
+                                                        <td class="px-4 py-3">
                                                             ${this.getStatusBadge(user.status, user.customStatus)}
+                                                            ${isTempBlocked ? '<span class="text-xs text-red-600 ml-2">🚫 Блок</span>' : ''}
                                                         </td>
-                                                        <td class="px-6 py-4 text-sm text-gray-500">
-                                                            ${new Date(user.registeredAt).toLocaleDateString()}
-                                                        </td>
-                                                        <td class="px-6 py-4 space-x-2">
-                                                            ${canEdit ? `
-                                                                <button
-                                                                    onclick="app.state.editingUser='${user.id}'; app.state.newStatus='${user.status}'; app.state.customStatus='${user.customStatus}'; app.state.page='editStatus'; app.render();"
-                                                                    class="px-3 py-1 bg-blue-100 text-blue-800 rounded text-sm hover:bg-blue-200"
-                                                                >
-                                                                    Статус өзгөртүү
+                                                        <td class="px-4 py-3 space-x-2">
+                                                            ${canModerate ? `
+                                                                <button onclick="app.tempBlockUser('${user.id}', 60)"
+                                                                        class="px-3 py-1 bg-red-100 text-red-800 rounded text-sm hover:bg-red-200">
+                                                                    1 саат блок
                                                                 </button>
-                                                            ` : ''}
-                                                            
-                                                            ${user.id !== '1' && canEdit ? `
-                                                                <button
-                                                                    onclick="app.blockUser('${user.id}')"
-                                                                    class="px-3 py-1 ${user.isBlocked ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} rounded text-sm hover:opacity-90"
-                                                                >
-                                                                    ${user.isBlocked ? 'Ачуу' : 'Блоктоо'}
+                                                                <button onclick="app.tempBlockUser('${user.id}', 1440)"
+                                                                        class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700">
+                                                                    1 күн блок
                                                                 </button>
-                                                            ` : ''}
-                                                            
-                                                            ${user.id !== '1' && this.state.user.role === 'superadmin' ? `
-                                                                <button
-                                                                    onclick="app.deleteUser('${user.id}')"
-                                                                    class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-                                                                >
-                                                                    Өчүрүү
-                                                                </button>
-                                                            ` : ''}
+                                                                ${isTempBlocked ? `
+                                                                    <button onclick="app.unblockUser('${user.id}')"
+                                                                            class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                                                                        Блокту ачуу
+                                                                    </button>
+                                                                ` : ''}
+                                                            ` : '<span class="text-gray-400">Түзөтүүгө болбойт</span>'}
                                                         </td>
                                                     </tr>
                                                 `;
@@ -892,129 +1239,217 @@
                                     </table>
                                 </div>
                             </div>
-                            
-                            <!-- Admin Notes -->
-                            <div class="mt-8 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-6 border border-blue-200">
-                                <h3 class="text-lg font-semibold text-gray-800 mb-4">
-                                    <i class="fas fa-info-circle mr-2"></i>
-                                    Админ мүмкүнчүлүктөрү
-                                </h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div class="bg-white p-4 rounded-lg border">
-                                        <h4 class="font-medium text-gray-800 mb-2">Статус системасы</h4>
-                                        <ul class="text-sm text-gray-600 space-y-1">
-                                            <li>👑 <strong>Создатель</strong> - Баардык мүмкүнчүлүктөр</li>
-                                            <li>🛡️ <strong>Админ</strong> - Колдонуучуларды башкаруу</li>
-                                            <li>⭐ <strong>VIP</strong> - Атайын мүмкүнчүлүктөр</li>
-                                            <li>👤 <strong>Колдонуучу</strong - Башкаларга жол</li>
-                                        </ul>
-                                    </div>
-                                    
-                                    <div class="bg-white p-4 rounded-lg border">
-                                        <h4 class="font-medium text-gray-800 mb-2">Создательдин мүмкүнчүлүктөрү</h4>
-                                        <ul class="text-sm text-gray-600 space-y-1">
-                                            <li>✓ Каалаган ат менен статус түзүү</li>
-                                            <li>✓ Башка админдерди тандап коюу</li>
-                                            <li>✓ VIP статус берүү</li>
-                                            <li>✓ Колдонуучуларды өчүрүү</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 `;
             }
             
-            renderEditStatus() {
-                const user = this.state.users.find(u => u.id === this.state.editingUser);
-                if (!user) {
-                    this.state.page = 'admin';
-                    return this.render();
-                }
+            renderModeration() {
+                const pendingReports = this.state.reportedMessages.filter(r => r.status === 'pending');
                 
                 return `
-                    <div class="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-                        <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-                            <div class="text-center mb-6">
-                                <h1 class="text-2xl font-bold text-gray-800">Статус өзгөртүү</h1>
-                                <p class="text-gray-600">${user.username} үчүн</p>
+                    <div class="flex h-screen bg-gray-100">
+                        <!-- Sidebar -->
+                        <div class="w-20 bg-white border-r flex flex-col">
+                            <div class="p-4">
+                                <div class="bg-orange-600 w-12 h-12 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-flag text-white text-xl"></i>
+                                </div>
                             </div>
                             
-                            <div class="space-y-6">
-                                <!-- Current Avatar -->
-                                <div class="text-center">
-                                    <img src="${user.avatar}" class="w-20 h-20 rounded-full mx-auto mb-2">
-                                    <p class="text-sm text-gray-500">${user.username}</p>
+                            <div class="flex-1 py-4">
+                                <button onclick="app.state.page='admin'; app.render();"
+                                        class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                    <i class="fas fa-arrow-left"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Moderation Panel -->
+                        <div class="flex-1 p-6 overflow-y-auto">
+                            <div class="mb-8">
+                                <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-3">
+                                    <i class="fas fa-flag text-orange-600"></i>
+                                    Модерация
+                                </h1>
+                                <p class="text-gray-600 mt-2">Кароосуз билдирүүлөр жана шашылыштар</p>
+                            </div>
+                            
+                            ${pendingReports.length > 0 ? `
+                                <div class="space-y-4">
+                                    ${pendingReports.map(report => {
+                                        // Find message
+                                        let message;
+                                        if (report.chatType === 'public') {
+                                            message = this.state.messages.find(m => m.id === report.messageId);
+                                        } else if (report.chatType === 'group' && report.chatId) {
+                                            message = this.state.groupMessages[report.chatId]?.find(m => m.id === report.messageId);
+                                        }
+                                        
+                                        const reporter = this.state.users.find(u => u.id === report.reportedBy);
+                                        const sender = message ? this.state.users.find(u => u.id === message.senderId) : null;
+                                        
+                                        if (!message) return '';
+                                        
+                                        return `
+                                            <div class="bg-white rounded-xl border p-4">
+                                                <div class="flex items-center justify-between mb-4">
+                                                    <div class="flex items-center gap-3">
+                                                        <img src="${sender?.avatar || ''}" class="w-10 h-10 rounded-full">
+                                                        <div>
+                                                            <div class="font-medium">${sender?.username || 'Белгисиз'}</div>
+                                                            <div class="text-xs text-gray-500">${message.timestamp}</div>
+                                                        </div>
+                                                    </div>
+                                                    <span class="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
+                                                        Кароосуз
+                                                    </span>
+                                                </div>
+                                                
+                                                <div class="bg-gray-50 p-3 rounded-lg mb-4">
+                                                    <p>${message.text}</p>
+                                                    ${message.hasBadWord ? '<div class="text-xs text-red-600 mt-1">⚠️ Жаман сөз табылды</div>' : ''}
+                                                </div>
+                                                
+                                                <div class="flex items-center justify-between">
+                                                    <div class="text-sm text-gray-500">
+                                                        Шикоо кылган: ${reporter?.username || 'Белгисиз'}
+                                                    </div>
+                                                    <div class="flex gap-2">
+                                                        <button onclick="app.deleteMessage('${message.id}', '${report.chatType}', '${report.chatId}')"
+                                                                class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700">
+                                                            Өчүрүү
+                                                        </button>
+                                                        <button onclick="app.tempBlockUser('${message.senderId}', 60)"
+                                                                class="px-3 py-1 bg-orange-600 text-white rounded text-sm hover:bg-orange-700">
+                                                            Блоктоо
+                                                        </button>
+                                                        <button onclick="
+                                                            const idx = app.state.reportedMessages.findIndex(r => r.messageId === '${report.messageId}');
+                                                            if (idx > -1) app.state.reportedMessages[idx].status = 'resolved';
+                                                            app.saveAll();
+                                                            app.render();
+                                                        " class="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                                                            Өткөрүп жиберүү
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
                                 </div>
-                                
-                                <!-- Status Selection -->
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                                        Статус тандоо
-                                    </label>
-                                    <div class="grid grid-cols-2 gap-2 mb-4">
-                                        <button type="button" onclick="app.state.newStatus='creator'; app.render();" 
-                                                class="p-3 rounded-lg ${this.state.newStatus==='creator'?'status-creator':'bg-gray-100'}">
-                                            👑 Создатель
-                                        </button>
-                                        <button type="button" onclick="app.state.newStatus='admin'; app.render();"
-                                                class="p-3 rounded-lg ${this.state.newStatus==='admin'?'status-admin':'bg-gray-100'}">
-                                            🛡️ Админ
-                                        </button>
-                                        <button type="button" onclick="app.state.newStatus='moderator'; app.render();"
-                                                class="p-3 rounded-lg ${this.state.newStatus==='moderator'?'status-moderator':'bg-gray-100'}">
-                                            ⭐ Модератор
-                                        </button>
-                                        <button type="button" onclick="app.state.newStatus='vip'; app.render();"
-                                                class="p-3 rounded-lg ${this.state.newStatus==='vip'?'status-vip':'bg-gray-100'}">
-                                            💎 VIP
-                                        </button>
-                                        <button type="button" onclick="app.state.newStatus='user'; app.render();"
-                                                class="p-3 rounded-lg ${this.state.newStatus==='user'?'status-user':'bg-gray-100'} col-span-2">
-                                            👤 Колдонуучу
-                                        </button>
-                                    </div>
+                            ` : `
+                                <div class="text-center py-12">
+                                    <i class="fas fa-check-circle text-green-500 text-4xl mb-4"></i>
+                                    <h3 class="text-xl font-medium text-gray-800">Кароосуз билдирүүлөр жок</h3>
+                                    <p class="text-gray-600 mt-2">Баардык шикоолор каралды</p>
                                 </div>
-                                
-                                <!-- Custom Status -->
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                                        Өзгөчө статус (каалаган ат)
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value="${this.state.customStatus}"
-                                        oninput="app.state.customStatus=this.value"
-                                        class="w-full border border-gray-300 rounded-lg px-4 py-3"
-                                        placeholder="Мисалы: Топ жетекчиси, Активдүү студент..."
-                                    />
-                                    <p class="text-xs text-gray-500 mt-1">
-                                        Бош калтырсаңыз, стандарттуу ат колдонулат
-                                    </p>
-                                </div>
-                                
-                                <!-- Actions -->
-                                <div class="flex gap-3 pt-4">
-                                    <button
-                                        onclick="app.updateUserStatus(
-                                            '${user.id}', 
-                                            app.state.newStatus, 
-                                            app.state.customStatus
-                                        ); app.state.page='admin'; app.render();"
-                                        class="flex-1 bg-gradient-to-r from-green-600 to-blue-600 text-white font-semibold py-3 rounded-lg hover:opacity-90"
-                                    >
-                                        Сактоо
-                                    </button>
-                                    
-                                    <button
-                                        onclick="app.state.page='admin'; app.render();"
-                                        class="flex-1 border-2 border-gray-300 text-gray-700 font-semibold py-3 rounded-lg hover:bg-gray-50"
-                                    >
-                                        Артка
-                                    </button>
+                            `}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            renderPrivateChats() {
+                const privateChats = this.getPrivateChats();
+                
+                return `
+                    <div class="flex h-screen bg-gray-100">
+                        <!-- Sidebar -->
+                        <div class="w-20 bg-white border-r flex flex-col">
+                            <div class="p-4">
+                                <div class="bg-purple-600 w-12 h-12 rounded-lg flex items-center justify-center">
+                                    <i class="fas fa-eye text-white text-xl"></i>
                                 </div>
                             </div>
+                            
+                            <div class="flex-1 py-4">
+                                <button onclick="app.state.page='admin'; app.render();"
+                                        class="w-full p-3 text-gray-500 hover:bg-gray-100">
+                                    <i class="fas fa-arrow-left"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Private Chats -->
+                        <div class="flex-1 p-6 overflow-y-auto">
+                            <div class="mb-8">
+                                <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-3">
+                                    <i class="fas fa-eye text-purple-600"></i>
+                                    Жеке чаттарды көрүү
+                                </h1>
+                                <p class="text-gray-600 mt-2">Создательдин атайын мүмкүнчүлүгү</p>
+                                <div class="text-sm text-gray-500 mt-1">
+                                    Текшерүү үчүн чатты чыкылдатыңыз
+                                </div>
+                            </div>
+                            
+                            ${privateChats.length > 0 ? `
+                                <div class="space-y-4">
+                                    ${privateChats.map(chat => {
+                                        const lastMessage = chat.messages[chat.messages.length - 1];
+                                        return `
+                                            <div class="bg-white rounded-xl border p-4 hover:shadow-md cursor-pointer"
+                                                 onclick="
+                                                     app.state.selectedUser1 = '${chat.userId1}';
+                                                     app.state.selectedUser2 = '${chat.userId2}';
+                                                     app.state.viewingPrivateChat = '${chat.userId1}_${chat.userId2}';
+                                                     this.nextElementSibling.classList.toggle('hidden');
+                                                 ">
+                                                <div class="flex items-center justify-between">
+                                                    <div class="flex items-center gap-3">
+                                                        <div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                                                            <i class="fas fa-comments text-purple-600"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div class="font-medium">${chat.user1} ↔ ${chat.user2}</div>
+                                                            <div class="text-xs text-gray-500">${chat.messages.length} билдирүү</div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        ${lastMessage ? lastMessage.timestamp : ''}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="bg-gray-50 rounded-xl border p-4 hidden">
+                                                <div class="space-y-3 max-h-60 overflow-y-auto">
+                                                    ${chat.messages.map(msg => {
+                                                        const sender = this.state.users.find(u => u.id === msg.senderId);
+                                                        return `
+                                                            <div class="${msg.senderId === chat.userId1 ? 'text-right' : 'text-left'}">
+                                                                <div class="inline-block max-w-xs">
+                                                                    <div class="text-xs text-gray-500 mb-1">
+                                                                        ${sender?.username || 'Белгисиз'} • ${msg.timestamp}
+                                                                    </div>
+                                                                    <div class="${msg.senderId === chat.userId1 ? 'bg-blue-100 text-gray-800' : 'bg-white'} rounded-lg px-3 py-2">
+                                                                        ${msg.text}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        `;
+                                                    }).join('')}
+                                                </div>
+                                                <div class="mt-4 pt-4 border-t">
+                                                    <button onclick="app.tempBlockUser('${chat.userId1}', 60)"
+                                                            class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 mr-2">
+                                                        ${chat.user1} блоктоо
+                                                    </button>
+                                                    <button onclick="app.tempBlockUser('${chat.userId2}', 60)"
+                                                            class="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700">
+                                                        ${chat.user2} блоктоо
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            ` : `
+                                <div class="text-center py-12">
+                                    <i class="fas fa-comment-slash text-gray-400 text-4xl mb-4"></i>
+                                    <h3 class="text-xl font-medium text-gray-800">Жеке чаттар жок</h3>
+                                    <p class="text-gray-600 mt-2">Эч ким жеке чатташкан жок</p>
+                                </div>
+                            `}
                         </div>
                     </div>
                 `;
